@@ -2,7 +2,7 @@
 //Sección: 11
 //Catedratico: Luis Rivera
 //Por: Juan Diego Castillo Amaya -17074 y Hector Alejandro Klée Gonzales - 17118
-//Parte 2
+//Parte 3
 #include <SPI.h>
 #include "wiring_private.h"
 #include "inc/hw_ints.h"
@@ -10,8 +10,22 @@
 #include "driverlib/rom.h"
 #include "driverlib/timer.h"
 #include "driverlib/sysctl.h"
-int proceso=0; //se define una variable para seleccionar si se envia
+#define COTA_SUP 3.3
+#define COTA_INF 0
+//int proceso=0; //se define una variable para seleccionar si se envia
                //un diente de cierra o se utiliza el potenciomentro 
+int metodo=0; //se define el metodo que se desea realiza
+              //0. sin discretizar
+              //1. tustin
+              //2. Zero-Pole Matching
+              //3. Zero-Orde hold
+              //4. Backward euler
+//--------------------------------------------Se definen las variables a utilizar en el controlador PID-----------------------------------------
+float Uk = 0, Uk_1 = 0, Uk_2 =0;
+float Ek = 0, Ek_1 = 0, Ek_2 = 0;
+float b0, b1, b2;
+float a1, a2;
+
 int Timers;
 int diente = 0;
 //Enviar la señal de un potenciometro leido por el dac
@@ -21,23 +35,67 @@ int frecdiv; //se define la freciencia por la que se va a dividir la frecuencia 
 const int ss = PD_1; //se espesifica el salve select
 
 const int AnalogInPin = A0; //El pin de netrada del potenciometro (ADC)
+const int AnalogOutPin = A1;
 int Pot = 0; //se guardara el valor del pot en este lugar
+int salida=0;
 
 void setup() {
   pinMode(ss,OUTPUT); //se especifica el pin PB_5 como salida
   SPI.begin(); //se inicializa el SPI
   digitalWrite(ss,HIGH);
-  if (proceso==0)
+//--------------------------------------------Controlador con el sistema sin discretizar---------------------------------------------
+  if (metodo==0)
   {
-    Timers = 10; //se define el tiempo que se desea para que el timer se interrumpa
+    b0=400;
+    b1=65700;
+    b2=2430500;
+    a1=2485600;
+    a2=0;
+    Timers=40231;
   }
-  else
+//--------------------------------------------Controlador con metodo tustin---------------------------------------------------------
+  else if (metodo==1)
   {
-    Timers = 1000;//se define el tiempo que se desea para que el timer se interrumpa
+    b0=35.3277;
+    b1=-65.5833;
+    b2=30.4366;
+    a1=-0.1489;
+    a2=-0.5811;
+    Timers=1000;
+  }
+//--------------------------------------------Controlador con metodo Zero-Pole Matching---------------------------------------------------------
+  else if (metodo==2)
+  {
+    b0=163.8685;
+    b1=-325.3053;
+    b2=161.4457;
+    a1=-1.0833;
+    a2=0.0833;
+    Timers=100;
+  }
+//--------------------------------------------Controlador con metodo Zero-Order Hold---------------------------------------------------------
+  else if (metodo==3)
+  {
+    b0=440.9373;
+    b1=-881.2930;
+    b2=440.3559;
+    a1=-1.7799;
+    a2=0.7799;
+    Timers=100;
+  }
+//--------------------------------------------Controlador con metodo Backward Euler---------------------------------------------------------
+  else if (metodo==4)
+  {
+    b0=353.6824;
+    b1=-706.8383;
+    b2=353.1561;
+    a1=-1.8009;
+    a2=0.8009;
+    Timers=10;
   }
   frecdiv =(80*Timers);
   configureTimer1A();
-  }
+}
 
 void loop() {
   
@@ -76,7 +134,7 @@ void configureTimer1A(){
 void Timer1AHandler(void){
   //Required to launch next interrupt
   ROM_TimerIntClear(TIMER1_BASE, TIMER_A);
-  if (proceso == 0)
+  /*if (proceso == 0)
   {
     for(diente=0;diente<4096;diente++)
     {
@@ -86,12 +144,31 @@ void Timer1AHandler(void){
     {
       digitalPotWrite(diente, ss);
     }
-  }
-  else
-  {
-    Pot = analogRead(AnalogInPin);
-    digitalPotWrite(Pot, ss);
-  }
+  }*/
+  //else
+  //{
+    Pot = analogRead(AnalogInPin)*3.3/4095;
+    salida=analogRead(AnalogOutPin)*3.3/4095;
+//-----------------------------------------Se implementa el controlador PID en base a la ecuacion de diferencia---------------------------------------
+    Ek= Pot - salida;
+    Uk= b0*Ek + b1*Ek_1 + b2*Ek_2 -a1*Uk_1 - a2*Uk_2;
+    Ek_2=Ek_1;
+    Ek_1=Ek;
+    Uk_2=Uk_1;
+    Uk_1=Uk;
+//------------------------------------------Se especifica limite superior para la salida del controlador--------------------------------------------
+    if (Uk>COTA_SUP)
+    {
+      Uk=COTA_SUP;
+    }
+//------------------------------------------Se especifica limite inferior para la salida del controlador--------------------------------------------
+    else if (Uk<COTA_INF)
+    {
+      Uk=COTA_INF;
+    }
+//-----------------------------------------Se ingresas la salida del sistema al DAC-------------------------------------------------
+    digitalPotWrite(Uk, ss);
+  //}
   
 }
 int digitalPotWrite(int value, int slave_select) {
